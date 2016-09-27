@@ -15,20 +15,25 @@ When already setup:
 
 ### HTTP Methods
 
-- setup: http://[deviceIp]/setup?ssid=[your-ssid]&pass=[your-pass]
+- **setup:** `http://[deviceIp]/setup?ssid=[your-ssid]&pass=[your-pass]`
+
 Sets up connection to your wifi network.
 
-- reset: http://[deviceIp]/reset-config
+- **reset:** `http://[deviceIp]/reset-config`
+
 Resets saved config (connection data to your wifi network).
 
-- retry login: http://[deviceIp]/retry-wifi-login
+- **retry login:** `http://[deviceIp]/retry-wifi-login`
+
 Retries login to your wifi network.
 
-- start AP: http://[deviceIp]/start-access-point
+- **start AP:** `http://[deviceIp]/start-access-point`
+
 Starts access point.
 
-- disconnect station: http://[deviceIp]/disconnect-station
+- **disconnect station:** `http://[deviceIp]/disconnect-station`
+
 Disconnects from your wifi network.
 
-- info: http://[deviceIp]/device-info
+- **info:** `http://[deviceIp]/device-info`
 Returns device info in query string format.
