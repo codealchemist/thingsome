@@ -3,15 +3,23 @@
 #include <ESP8266WiFi.h>
 #include <info.h>
 #include <index.h>
+#include <raw.h>
 #pragma GCC diagnostic ignored "-Wwrite-strings"
 
 // register events
 WiFiEventHandler onSoftAPModeStationConnected;
 WiFiEventHandler onSoftAPModeStationDisconnected;
 
+IPAddress apLocalIp(192,168,4,1);
+IPAddress apGateway(192,168,4,100);
+IPAddress apSubnet(255,255,255,0);
+
 #define LED_PIN 5
 String station_ssid = "";
 String station_psk = "";
+String station_ip = "";
+bool shouldDisconnectAp = false;
+bool shouldDisconnectStation = false;
 
 // set server on port 80
 WiFiServer server(80);
@@ -44,28 +52,42 @@ void setupWifi() {
 void loop() {
   WiFiClient client = server.available();  // Check if a client has connected
   if (!client) return;
+  shouldDisconnectAp = false;
+  shouldDisconnectStation = false;
 
   while (client.connected()) {
     if (!client.available()) continue;
 
     // read the request one line at a time
     String req = client.readStringUntil('\r');
-    if (isFaviconRequest(&req)) return; // ignore favicon request
+    if (isFaviconRequest(&req)) break; // ignore favicon request
     // Serial.println(req);
 
     // setup
     if (isSetupRequest(&req)) {
       Serial.println(F("SETUP"));
       setStationConfig(&req); // get and save config
-      client.println(INDEX("Setup completed"));
+
+      // connect station and return obtained ip
+      if (startStation()) {
+        client.println(RAW("ip=" + station_ip));
+        shouldDisconnectAp = true;
+        break;
+      }
+
+      // unable to connect, return error
+      client.println(RAW("not connected", "502 ERROR"));
+      break;
     }
 
     // reset
     if (isResetRequest(&req)) {
       Serial.println(F("RESET"));
       resetStationConfig();
+      client.println(INDEX("Device reset completed. Starting Access Point..."));
+      shouldDisconnectStation = true;
       startAccessPoint();
-      client.println(INDEX("Device reset completed"));
+      break;
     }
 
     // retry
@@ -75,6 +97,7 @@ void loop() {
       if (!startStation()) {
         startAccessPoint();
       }
+      break;
     }
 
     // start access point
@@ -85,15 +108,26 @@ void loop() {
       break; // no need to continue processing request
     }
 
+    // disconncet station
     if (isDisconnectStationRequest(&req)) {
       Serial.println(F("DISCONNECT STATION"));
-      WiFi.disconnect(true);
+      shouldDisconnectStation = true;
       client.println(INDEX("Disconnected from " + station_ssid));
+      break;
     }
 
+    // disconnect ap
+    if (isDisconnectApRequest(&req)) {
+      Serial.println(F("DISCONNECT AP"));
+      disconnectAp();
+      client.println(INDEX("AP Disconnected"));
+      break;
+    }
+
+    // info
     if (isInfoRequest(&req)) {
       Serial.println(F("RETURN DEVICE INFO"));
-      client.println(INFO());
+      client.println(RAW(INFO()));
       break; // no need to continue processing request
     }
 
@@ -108,6 +142,20 @@ void loop() {
   delay(1);
   client.stop();
   Serial.println(F("Client disonnected"));
+
+  // wait until response is sent to client before disconnecting ap
+  // to ensure response reaches client
+  if (shouldDisconnectAp) {
+    delay(5);
+    disconnectAp();
+  }
+
+  // wait until response is sent to client before disconnecting station
+  // to ensure response reaches client
+  if (shouldDisconnectStation) {
+    delay(5);
+    disconnectStation();
+  }
 
   // The client will actually be disconnected
   // when the function returns and 'client' object is detroyed
@@ -154,6 +202,12 @@ bool isDisconnectStationRequest(String *req) {
   return false;
 }
 
+bool isDisconnectApRequest(String *req) {
+  // sample setup request: GET /disconnect-ap HTTP/1.1
+  if (req->indexOf("GET /disconnect-ap") != -1) return true;
+  return false;
+}
+
 bool isInfoRequest(String *req) {
   // sample setup request: GET /device-info HTTP/1.1
   if (req->indexOf("GET /device-info") != -1) return true;
@@ -195,12 +249,22 @@ void resetStationConfig() {
   SPIFFS.remove("/config.txt");
 }
 
+void disconnectAp() {
+  Serial.println(F("Disconnecting AP..."));
+  WiFi.softAPdisconnect(true);
+}
+
+void disconnectStation() {
+  Serial.println(F("Disconnecting Station..."));
+  WiFi.disconnect(true);
+}
+
 void startAccessPoint() {
   String ssid = "IOT-DEVICE-";
   char pass[] = "----iotfun"; // min 8 chars or the AP is initialized with default values!
   Serial.println(F("Starting AP..."));
   Serial.println(F("Default AP IP: 192.168.4.1"));
-  WiFi.mode(WIFI_AP);
+  WiFi.mode(WIFI_AP_STA);
 
   // listen to wifi events
   onSoftAPModeStationConnected = WiFi.onSoftAPModeStationConnected([](const WiFiEventSoftAPModeStationConnected& event) {
@@ -219,7 +283,11 @@ void startAccessPoint() {
   macID.toUpperCase();
   String uniqueSsid = ssid + macID;
 
+  // set hostname
   WiFi.hostname(uniqueSsid);
+
+  // start AP setting SSID and PASS
+  WiFi.softAPConfig(apLocalIp, apGateway, apSubnet);
   WiFi.softAP(uniqueSsid.c_str(), pass);
 }
 
@@ -241,7 +309,7 @@ bool startStation() {
 
   // config loaded, start station
   Serial.println("Connecting to " + station_ssid);
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_AP_STA);
   WiFi.begin(station_ssid.c_str(), station_psk.c_str());
 
   // Give ESP 10 seconds to connect to station
@@ -259,9 +327,9 @@ bool startStation() {
   }
 
   // connected OK!
+  station_ip = WiFi.localIP().toString();
   Serial.println("Connected to " + station_ssid);
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("IP address: " + station_ip);
   return true;
 }
 

@@ -1,7 +1,9 @@
 #include <Arduino.h>
 
 String INDEX(String status) {
-  String html = "HTTP/1.1 200 OK\r\n"
+  String html = ""
+  "HTTP/1.1 200 OK\r\n"
+  "Access-Control-Allow-Origin: *\r\n"
   "Content-Type: text/html\r\n\r\n"
   "<!DOCTYPE HTML>"
   "<html>"
